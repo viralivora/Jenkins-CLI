@@ -1,0 +1,346 @@
+""" Script for operating basic Jenkins Commands through Linux Shell Using HTTP API and Headers
+"""
+import sys
+import urllib2
+import time
+import json
+import argparse
+import base64
+import getpass
+import logging
+import re
+
+PURPLE = '\033[95m'
+CYAN = '\033[96m'
+DARKCYAN = '\033[36m'
+BLUE = '\033[94m'
+GREEN = '\033[92m'
+YELLOW = '\033[93m'
+RED = '\033[91m'
+BOLD = '\033[1m'
+UNDERLINE = '\033[4m'
+END = '\033[0m'
+
+
+def check(usrargs):
+    """ Checks the validity of the credentials passed in the args object
+    """
+    return usrargs.user and usrargs.password and usrargs.url
+
+def validate_url(urlargs):
+    """ Validates the url : domain name , portnumber
+    """
+    modified_url = re.findall(
+        'http[s]?://[a-z0-9\-._=]+@?[a-z0-9\-._]' + '[:[0-9]+]?', urlargs.url)
+    if len(modified_url) > 0 and modified_url[0] == urlargs.url:
+        port = int(modified_url[0].split(':')[2])
+        return port <= 65536
+    else:
+        return False
+
+
+def get_url(urlargs):
+    """ Get URL from User
+    """
+    print 'enter url:'
+    urlargs.url = raw_input()
+
+
+def get_user(usrargs):
+    """ Get Username From User
+    """
+    print 'enter username:'
+    usrargs.user = raw_input()
+
+
+def get_password(passargs):
+    """ Get Password From User
+    """
+    print 'enter password:'
+    passargs.password = getpass.getpass()
+
+
+def getconfigdefault():
+    """ Getting credential details from the default file "default.json
+    """
+    text_file = open("default.json")
+    data = json.load(text_file)
+    return data
+
+
+def getconfig(configargs):
+    """ Getting credential details from the
+        1.File Mentioned in args.f
+        2.Passed By the User
+        3.Default File "Default.json"
+    """
+    data = None
+    if configargs.f:
+        try:
+            text_file = open(configargs.f)
+            data = json.load(text_file)
+        except IOError as errno:
+            print errno
+            print "Reading Default value from default.json"
+            data = getconfigdefault()
+    else:
+        try:
+            data = getconfigdefault()
+            return data
+        except IOError, warnings:
+            print warnings
+
+
+def set_crumb(call_request, crumbargs):
+    """ Get the Jenkins-Crumb from the url and adding it as a header to the call request
+    """
+    url1 = args.url + "/crumbIssuer/api/json"
+    request = urllib2.Request(url1)
+    base64string = base64.b64encode('%s:%s' % (crumbargs.user, crumbargs.password))
+    request.add_header("Authorization", "Basic %s" % base64string)
+    try:
+        result = urllib2.urlopen(request)
+        data = json.load(result)
+        call_request.add_header('Jenkins-Crumb', data['crumb'])
+    except IOError, warnings:
+        print warnings
+        print "Unable to get crumb.Check the credentials"
+        sys.exit()
+
+
+def merge_config_args(conf_data, mergeargs):
+    """ Merging the credentials from the default file,the file and the arguments passed by the user
+    """
+    if conf_data != None:
+        if conf_data['url']:
+            mergeargs.url = conf_data['url']
+            while not validate_url(mergeargs):
+                print "Url is not valid"
+                get_url(mergeargs)
+        else:
+            get_url(mergeargs)
+
+        if conf_data['username']:
+            mergeargs.user = conf_data['username']
+        else:
+            get_user(mergeargs)
+        if conf_data['password']:
+            mergeargs.password = conf_data['password']
+        else:
+            get_password(mergeargs)
+
+
+def save_config_file(saveargs):
+    """ Saving the configuration details of a particular job in the file mentiones by the user
+    """
+    print "enter file name:"
+    file_name = raw_input()
+    try:
+        text_file = open(file_name, "w")
+        url1 = saveargs.url + "/job/" + saveargs.s + "/config.xml"
+        request = urllib2.Request(url1)
+        base64string = base64.b64encode('%s:%s' % (saveargs.user, saveargs.password))
+        request.add_header("Authorization", "Basic %s" % base64string)
+        result = urllib2.urlopen(request)
+        line_list = result.readlines()
+        for line in line_list:
+            text_file.write(line)
+        print "File suucessfully saved!!"
+        text_file.close()
+    except IOError, warnings:
+        print warnings
+
+
+def list_all_jobs(listargs):
+    """ Listing all the jobs present for a particular credential
+    """
+    url1 = listargs.url + "/api/json?tree=jobs[name]"
+    response = urllib2.Request(url1)
+    base64string = base64.b64encode('%s:%s' % (listargs.user, listargs.password))
+    response.add_header("Authorization", "Basic %s" % base64string)
+    result = urllib2.urlopen(response)
+    data = json.load(result)
+    for job in data['jobs']:
+        print BOLD + BLUE + job['name'] + END
+
+
+def build_job(buildargs):
+    """ Building an Unparametrised Job
+    """
+    url1 = buildargs.url + "/job/" + buildargs.b + "/build"
+    request = urllib2.Request(url1, "")
+    base64string = base64.b64encode('%s:%s' % (buildargs.user, buildargs.password))
+    request.add_header("Authorization", "Basic %s" % base64string)
+    set_crumb(request, buildargs)
+    result = urllib2.urlopen(request)
+    if result.getcode() == 201:
+        print "Started Building !!"
+    else:
+        print result.read()
+
+
+def valid_param(paramargs):
+    """ Checking whether the parameters passed for a particular Parameterised Job are valid
+    """
+    url1 = paramargs.url + "/job/" + paramargs.b + "/api/json"
+    response = urllib2.Request(url1)
+    base64string = base64.b64encode('%s:%s' % (paramargs.user, paramargs.password))
+    response.add_header("Authorization", "Basic %s" % base64string)
+    result = urllib2.urlopen(response)
+    data = json.load(result)
+    lis = paramargs.p.split('&')
+    final_lis = []
+    for actions in data['actions']:
+        for parameter in actions['parameterDefinitions']:
+            final_lis.append(str(parameter['name']))
+        break
+    if  len(lis) > len(final_lis):
+        return 1
+    else:
+        for elem in lis:
+            element = elem.split('=')[0]
+            if element not in final_lis:
+                return 3
+        return 2
+
+
+def build_with_param(buildargs):
+    """ Building a Parameterised Job
+    """
+    choice = valid_param(buildargs)
+    if choice == 1:
+        print "The parameters passed exceeds the maximum value"
+        return False
+    elif choice == 3:
+        print "The parameters passed do not match the required parameters"
+        return False
+    else:
+        url1 = buildargs.url + "/job/" + buildargs.b + "/buildWithParameters?" + buildargs.p
+        request = urllib2.Request(url1, "")
+        base64string = base64.b64encode('%s:%s' % (buildargs.user, buildargs.password))
+        request.add_header("Authorization", "Basic %s" % base64string)
+        set_crumb(request, buildargs)
+        logging.warning("REST API: " + request.get_full_url())
+        logging.info(request.header_items())
+        result = urllib2.urlopen(request)
+        logging.info(result.info())
+        if result.getcode() == 201:
+            print "Started Building !!"
+            return True
+        else:
+            print result.read()
+            return False
+
+
+def build_history(buildargs):
+    """ Build History for a Particular Job
+    """
+    url1 = buildargs.url + "/job/" + buildargs.hist + "/api/json?tree=allBuilds[*]"
+    request = urllib2.Request(url1, "")
+    base64string = base64.b64encode('%s:%s' % (buildargs.user, buildargs.password))
+    request.add_header("Authorization", "Basic %s" % base64string)
+    set_crumb(request, buildargs)
+    try:
+        result = urllib2.urlopen(request)
+        data = json.load(result)
+        print "Build No | Result | Duration | Timestamp"
+        for build in data['allBuilds']:
+            date = time.ctime(build['timestamp']).split('\n')[0]
+            print "|  %s   | %s |  %s   | %s |" %(build['id'], build['result'], build['duration'],
+                                                  date)
+    except IOError as rerror:
+        print "Job name doesn't exist", rerror
+
+def get_latest_build(latestargs):
+    """ Getting the latest build for a particular Job
+    """
+    url1 = latestargs.url + "/job/" + latestargs.o + "/api/json?tree=allBuilds[*]"
+    request = urllib2.Request(url1, "")
+    base64string = base64.b64encode('%s:%s' % (latestargs.user, latestargs.password))
+    request.add_header("Authorization", "Basic %s" % base64string)
+    set_crumb(request, latestargs)
+    result = urllib2.urlopen(request)
+    data = json.load(result)
+    for build in data['allBuilds']:
+        return build['id']
+
+
+def console_output(consoleargs):
+    """ Getting the Conole-Output For a Particular Job
+    """
+    if not consoleargs.n:
+        consoleargs.n = get_latest_build(consoleargs)
+    url1 = consoleargs.url + "/job/" + consoleargs.o + "/" + consoleargs.n \
+           + "/logText/progressiveText?start=0"
+    request = urllib2.Request(url1, "")
+    base64string = base64.b64encode('%s:%s' % (consoleargs.user, consoleargs.password))
+    request.add_header("Authorization", "Basic %s" % base64string)
+    set_crumb(request, consoleargs)
+    result = urllib2.urlopen(request)
+    print result.read(),
+    while "X-More-Data" in result.info():
+        time.sleep(5)
+        size = int(result.headers['X-Text-Size'])
+        url1 = consoleargs.url + "/job/" + consoleargs.o + "/" + consoleargs.n \
+               + "/logText/progressiveText?start=" + str(size)
+        request = urllib2.Request(url1, "")
+        base64string = base64.b64encode('%s:%s' % (consoleargs.user, consoleargs.password))
+        request.add_header("Authorization", "Basic %s" % base64string)
+        set_crumb(request, consoleargs)
+        result = urllib2.urlopen(request)
+        if int(result.headers['Content-Length']):
+            print result.read(),
+
+
+if __name__ == '__main__':
+    # print('\x1bc')
+    print UNDERLINE + BOLD + YELLOW + 'JENKINS SHELL' + END
+    print
+    print
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-user", help="add username")
+    parser.add_argument(
+        "-url", help="add url")
+    parser.add_argument("-password", help="add password")
+    parser.add_argument(
+        "-f", help="file name to search for credentials")
+    parser.add_argument("-s", help="save the config file")
+    parser.add_argument("-l", help="list all the jobs", action="store_true")
+    parser.add_argument("-b", help="build")
+    parser.add_argument("-p", help="parameters")
+    parser.add_argument("-hist", help="build-history")
+    parser.add_argument(
+        "-o", help="enter the job whose console output needs to be retrieved")
+    parser.add_argument("-n", help="enter the build number")
+    parser.add_argument("-d", help="debug output", type=int)
+    args = parser.parse_args()
+    DLEVEL = logging.ERROR
+    if args.d == 1:
+        DLEVEL = logging.WARNING
+    elif args.d == 2:
+        DLEVEL = logging.INFO
+    elif args.d == 3:
+        DLEVEL = logging.DEBUG
+
+    logging.basicConfig(stream=sys.stdout, format='%(message)s', level=DLEVEL)
+    CONF_DATA = getconfig(args)
+    merge_config_args(CONF_DATA, args)
+
+    if check(args):
+        if args.s:
+            save_config_file(args)
+
+        if args.l:
+            list_all_jobs(args)
+
+        if args.b:
+            if args.p:
+                build_with_param(args)
+            else:
+                build_job(args)
+
+        if args.hist:
+            build_history(args)
+
+        if args.o:
+            console_output(args)
