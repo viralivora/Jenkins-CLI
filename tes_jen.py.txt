@@ -1,0 +1,182 @@
+import urllib2
+import urllib
+import json
+import argparse
+import tempfile
+import base64
+import os.path
+import getpass
+import logging
+import unittest
+import re
+from jen import build_with_param,valid_param,merge_config_args,check,validate_url
+
+def clear_args():
+   parser=argparse.ArgumentParser()
+   args=parser.parse_args()
+   return args
+
+def clear_args1():
+  args1=parser.parse_args()
+
+def default_args():
+  args=parser.parse_args()
+  text_file=open("default.json")
+  data=json.load(text_file)
+  args.url=data['url']
+  args.user=data['username']
+  args.password=data['password']
+  return args
+
+class valid_credentials(unittest.TestCase):
+  def test_containsempty(self):
+     args = clear_args()
+     args.user=''
+     args.password=''
+     args.url=''
+     self.assertFalse(check(args))
+
+  def test_containOnlyUsers(self):
+     args = clear_args()
+     args.user=''
+     args.password=''
+     args.url=''
+     self.assertFalse(check(args))
+
+  def test_containallvalues(self):
+     args = clear_args()
+     args.user=""
+     args.password=""
+     args.url="http://virali"
+     self.assertTrue(check(args))
+
+  def test_check_only_user(self):
+     args = clear_args()
+     args.user=None
+     args.password=None
+     args.url=None
+     self.assertFalse(check(args))
+
+  #####args=args1
+ # print args.url
+ # print "url="
+ # print data['url']
+
+  def test_url_valid(self):
+      #default file
+      args=default_args()
+      print args.user
+    #  args.url="http://virali:9000"
+      print "**********************args:",args.url
+      print "**********************args1:",args1.url
+      print args.password
+      self.assertTrue(validate_url(args))
+##### testing validate_url function#############
+
+  def test_withoutport(self):
+      args = clear_args()
+      args.url='http://virali'
+      self.assertTrue(validate_url(args))
+
+  def test_withport_contain_numbers(self):
+      args = clear_args()
+      args.url='http://virali:9000'
+      self.assertTrue(validate_url(args))
+
+  def test_withport_contain_string(self):
+      args = clear_args()
+      args.url='http://virali:9hdsgaj23'
+      self.assertFalse(validate_url(args))
+
+  def test_withoutdomain(self):
+      args = clear_args()
+      args.url='http://:9000';
+      self.assertFalse(validate_url(args))
+
+  def test_portgreaterthan65536(self):
+      args = clear_args()
+      args.url='http://:900000';
+      self.assertFalse(validate_url(args))
+
+  def test_portlessthan0(self):
+      args = clear_args()
+      args.url='http://107.dskk:-2'
+      self.assertFalse(validate_url(args))
+
+  def test_invaliddonmain(self):
+      args = clear_args()
+      args.url='http://^7&&8'
+      self.assertFalse(validate_url(args))
+
+##### END validate_url function#############
+
+  #if(args.f):
+  #         text_file=open(args.f)
+  #         data=json.load(text_file)
+  #else:
+  #          text_file=open("default.json")
+  #          data=json.load(text_file)
+
+  #args=args1
+
+  def test_credentialsdefaultvalue(self):
+        args = clear_args()
+        text_file=open("default.json");
+        data=json.load(text_file)
+        merge_config_args(data,args)
+        self.assertTrue(check(args))
+
+  def test_credentialswithouturl(self):
+        args = clear_args()
+        if(args.f):
+           text_file=open(args.f)
+           data=json.load(text_file)
+        else:
+            text_file=open("default.json")
+            data=json.load(text_file)
+        data['url']=''
+        merge_config_args(data,args)
+        self.assertFalse(check(args))
+
+ ####******testing==build_with_param****#####
+
+  def test_passingalltheparams(self):
+        args = clear_args()
+        text_file=open("default.json")
+        data=json.load(text_file)
+        merge_config_args(data,args)
+        args.b="buildparam"
+        args.p="env=a&env1=f&here=ckcnk"
+        self.assertTrue(build_with_param(args))
+
+  def test_passing_only_1_param(self):
+        args = clear_args()
+        text_file=open("default.json")
+        data=json.load(text_file)
+        merge_config_args(data,args)
+        args.b="buildparam"
+        args.p="env=a"
+        self.assertTrue(build_with_param(args))
+
+  def test_passing_invalid_params(self):
+        args = clear_args()
+        text_file=open("default.json")
+        data=json.load(text_file)
+        merge_config_args(data,args)
+        args.b="buildparam"
+        args.p="env=a&env2=f&here=ckcnk"
+        self.assertFalse(build_with_param(args))
+
+  def test_passingexcessparameters(self):
+        args = clear_args()
+        text_file=open("default.json")
+        data=json.load(text_file)
+        merge_config_args(data,args)
+        args.b="buildparam"
+        args.p="env=a&env1=f&here=ckcnk&env2=j"
+        self.assertFalse(build_with_param(args))
+
+
+
+if __name__=='__main__':
+ unittest.main()
